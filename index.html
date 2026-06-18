@@ -1,0 +1,511 @@
+import { useState, useRef, useEffect } from "react";
+
+const C = {
+  p50:"#EEEDFE",p200:"#AFA9EC",p400:"#7F77DD",p600:"#534AB7",p800:"#3C3489",
+  t50:"#E1F5EE",t400:"#1D9E75",t600:"#0F6E56",t800:"#085041",
+  a50:"#FAEEDA",a100:"#FAC775",a400:"#EF9F27",a600:"#854F0B",a800:"#633806",
+  r50:"#FAECE7",r600:"#993C1D",
+  g100:"#ECEAE4",g200:"#D3D1C7",g400:"#888780",
+  tx1:"#1a1a1a",tx2:"#555",tx3:"#888",
+  bg:"#fff",bg2:"#F7F6F3",bd:"rgba(0,0,0,0.1)",bd2:"rgba(0,0,0,0.16)",
+};
+const card={background:C.bg,border:`0.5px solid ${C.bd}`,borderRadius:14,padding:16,marginBottom:12};
+const lbl={fontSize:11,fontWeight:600,color:C.tx3,textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:6,display:"block"};
+const bp={background:C.p600,color:"#fff",border:"none",borderRadius:10,padding:"10px 20px",fontSize:14,fontWeight:500,cursor:"pointer",display:"inline-flex",alignItems:"center",gap:6,fontFamily:"inherit"};
+const bs={background:"transparent",border:`0.5px solid ${C.bd2}`,borderRadius:10,padding:"10px 16px",fontSize:14,cursor:"pointer",fontFamily:"inherit",color:C.tx1};
+const bsm={padding:"7px 14px",fontSize:13};
+const mb=a=>({flex:1,padding:10,border:`0.5px solid ${a?C.p400:C.bd2}`,borderRadius:10,background:a?C.p50:C.bg,color:a?C.p600:C.tx2,fontSize:13,fontWeight:500,cursor:"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",justifyContent:"center",gap:6});
+const bandSty={Developing:{background:C.r50,color:C.r600},Approaching:{background:C.a50,color:C.a600},Meeting:{background:C.t50,color:C.t600},Exceeding:{background:C.p50,color:C.p600}};
+
+const Chk=()=><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="20 6 9 17 4 12"/></svg>;
+const Arr=()=><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M5 12h14M12 5l7 7-7 7"/></svg>;
+const Spn=()=><div style={{width:14,height:14,border:`2px solid ${C.p200}`,borderTopColor:C.p600,borderRadius:"50%",animation:"spin 0.7s linear infinite"}}/>;
+
+async function callClaude(system,messages,max_tokens=1500){
+  const res=await fetch("/api/claude",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-haiku-4-5-20251001",max_tokens,system,messages})});
+  const data=await res.json();
+  if(!res.ok)throw new Error(`API ${res.status}: ${data?.error?.message||JSON.stringify(data)}`);
+  return data.content.map(b=>b.text||"").join("");
+}
+
+function Steps({active}){
+  const lbls=["Write","Read","Check","Feedback"];
+  return <div style={{display:"flex",alignItems:"center",marginBottom:20}}>
+    {lbls.map((l,i)=>{const n=i+1,done=n<active,act=n===active;return<div key={n} style={{display:"flex",alignItems:"center",flex:1}}>
+      <div style={{display:"flex",alignItems:"center",gap:5,fontSize:11,color:act?C.p600:done?C.t600:C.tx3}}>
+        <div style={{width:20,height:20,borderRadius:"50%",border:`1px solid ${act?C.p600:done?C.t400:C.bd2}`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:10,fontWeight:600,background:act?C.p600:done?C.t400:"transparent",color:act||done?"#fff":"inherit",flexShrink:0}}>{done?<Chk/>:n}</div>
+        <span>{l}</span>
+      </div>
+      {i<lbls.length-1&&<div style={{flex:1,height:1,background:C.bd,margin:"0 4px"}}/>}
+    </div>;})}
+  </div>;
+}
+
+function MiniChart({history}){
+  if(!history.length)return null;
+  return <div style={{display:"flex",alignItems:"flex-end",gap:4,height:52,marginTop:8}}>
+    {history.slice(-10).map((r,i,arr)=><div key={i} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",gap:2}}>
+      <div style={{fontSize:9,color:C.tx3,fontWeight:500}}>{r.score}</div>
+      <div style={{width:"100%",borderRadius:"3px 3px 0 0",background:i===arr.length-1?C.p600:C.p200,height:`${Math.round((r.score/50)*40)+4}px`}}/>
+      <div style={{fontSize:9,color:C.tx3}}>{r.date}</div>
+    </div>)}
+  </div>;
+}
+
+function CritRow({label,score,color}){
+  return <div style={{display:"flex",alignItems:"center",gap:10,padding:"6px 0",borderBottom:`0.5px solid ${C.bd}`}}>
+    <div style={{fontSize:12,color:C.tx2,flex:1}}>{label}</div>
+    <div style={{width:80,height:5,background:C.g200,borderRadius:3,flexShrink:0}}>
+      <div style={{height:5,borderRadius:3,background:color||C.p400,width:`${score*10}%`}}/>
+    </div>
+    <div style={{fontSize:12,fontWeight:600,color:C.tx1,minWidth:28,textAlign:"right"}}>{score}/10</div>
+  </div>;
+}
+
+export default function App(){
+  const [sc,setSc]=useState("upload");
+  const [tab,setTab]=useState("mark");
+  const [mode,setMode]=useState("photo");
+  const [prompt,setPrompt]=useState("Write a story beginning with the words: The door had always been locked — until today.");
+  const [editP,setEditP]=useState(false);
+  const [pDraft,setPDraft]=useState("");
+  const [studentName,setStudentName]=useState("");
+  const [editName,setEditName]=useState(false);
+  const [nameDraft,setNameDraft]=useState("");
+  const [files,setFiles]=useState([]);
+  const [typed,setTyped]=useState("");
+  const [pStep,setPStep]=useState(0);
+  const [pTitle,setPTitle]=useState("Reading your handwriting…");
+  const [pSub,setPSub]=useState("");
+  const [txRaw,setTxRaw]=useState("");
+  const [flags,setFlags]=useState([]);
+  const [fVals,setFVals]=useState({});
+  const [em,setEm]=useState(false);
+  const [et,setEt]=useState("");
+  const [result,setResult]=useState(null);
+  const [mEssay,setMEssay]=useState("");
+  const [mLoad,setMLoad]=useState(false);
+  const [mOpen,setMOpen]=useState(false);
+  const [err,setErr]=useState("");
+  const [history,setHistory]=useState([]);
+  const [histLoaded,setHistLoaded]=useState(false);
+  const fRef=useRef();
+  const afRef=useRef();
+
+  useEffect(()=>{
+    try{
+      const saved=localStorage.getItem("11plus_history");
+      if(saved){const p=JSON.parse(saved);setHistory(p.attempts||[]);setStudentName(p.studentName||"");}
+    }catch(e){}
+    setHistLoaded(true);
+  },[]);
+
+  function saveHistory(h,name){
+    try{localStorage.setItem("11plus_history",JSON.stringify({attempts:h,studentName:name!==undefined?name:studentName}));}catch(e){}
+  }
+
+  const sm={upload:1,proc:2,check:3,feedback:4};
+  function showErr(m){setErr(m);setTimeout(()=>setErr(""),8000);}
+  function savePrompt(){if(!pDraft.trim()){showErr("Please enter a prompt.");return;}setPrompt(pDraft.trim());setEditP(false);}
+  function saveName(){const n=nameDraft.trim();setStudentName(n);setEditName(false);saveHistory(history,n);}
+  function addFiles(nf){setFiles(p=>[...p,...Array.from(nf)]);}
+  function removeFile(i){setFiles(p=>p.filter((_,j)=>j!==i));}
+
+  async function toB64(file){return new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(r.result.split(",")[1]);r.onerror=()=>rej(new Error("fail"));r.readAsDataURL(file);});}
+
+  async function startReading(){
+    if(!files.length)return;
+    setSc("proc");setPStep(1);setPTitle("Reading your handwriting…");setPSub(files.length+" page"+(files.length!==1?"s":"")+" received");
+    try{
+      const imgs=await Promise.all(files.map(async f=>({type:"image",source:{type:"base64",media_type:f.type||"image/jpeg",data:await toB64(f)}})));
+      setPStep(2);
+      const sys=`You are reading handwritten student essays for 11+ exam preparation. Transcribe EXACTLY what is written. Do NOT correct spelling, grammar, or punctuation. If a word is illegible write [UNCLEAR:best_guess] or [UNCLEAR]. Preserve paragraph breaks with a blank line. Multiple pages: transcribe in order. Return ONLY the transcribed text, no commentary.`;
+      const raw=await callClaude(sys,[{role:"user",content:[...imgs,{type:"text",text:`Transcribe this ${files.length>1?files.length+"-page":""} handwritten essay.`}]}],2000);
+      setPStep(3);
+      const parsed=parseFlags(raw);
+      setTxRaw(raw);setFlags(parsed);setFVals(Object.fromEntries(parsed.map(f=>[f.id,f.guess])));
+      await new Promise(r=>setTimeout(r,400));setPStep(4);await new Promise(r=>setTimeout(r,300));
+      setSc("check");
+    }catch(e){setSc("upload");showErr("Could not read the photo: "+e.message);}
+  }
+
+  function submitTyped(){if(!typed.trim()){showErr("Please write or paste an essay first.");return;}setTxRaw(typed);setFlags([]);setFVals({});setSc("check");}
+
+  function parseFlags(raw){
+    const re=/\[UNCLEAR(?::([^\]]*))?\]/g;const res=[];let m,n=0;
+    while((m=re.exec(raw))!==null){n++;
+      const before=raw.substring(Math.max(0,m.index-40),m.index).split(/\s+/).slice(-4).join(" ");
+      const after=raw.substring(m.index+m[0].length,m.index+m[0].length+40).split(/\s+/).slice(0,4).join(" ");
+      res.push({id:n,full:m[0],guess:(m[1]||"").trim(),before,after});}
+    return res;
+  }
+
+  function resolved(){
+    if(em)return et;
+    let t=txRaw;
+    flags.forEach(f=>{t=t.replace(f.full,fVals[f.id]?.trim()||f.guess||"[unclear]");});
+    return t;
+  }
+
+  function toggleEdit(){
+    if(!em){setEt(resolved());setEm(true);}
+    else{setTxRaw(et);setFlags([]);setFVals({});setEm(false);}
+  }
+
+  function txHtml(){
+    let h=txRaw;
+    flags.forEach(f=>{const v=fVals[f.id]?.trim()||"";h=h.replace(f.full,`<span style="background:${v?C.t50:C.a50};color:${v?C.t600:C.a800};border-radius:3px;padding:0 3px;border-bottom:1.5px solid ${v?C.t400:C.a400}">${v||"[unclear]"}</span>`);});
+    return h.replace(/\n\n/g,"<br><br>").replace(/\n/g,"<br>");
+  }
+
+  async function submitMark(){
+    const essay=resolved().trim();
+    if(!essay){showErr("No essay text to mark.");return;}
+    setSc("proc");setPStep(4);setPTitle("Marking the essay…");setPSub("Applying all five criteria");
+    const sys=`You are an experienced 11+ examiner. Mark the essay against five criteria. Return ONLY valid JSON, no markdown, no preamble.
+
+PROMPT: "${prompt}"
+
+CRITERIA (0-10 each):
+1. content_and_ideas: 0-2 thin/predictable, 3-5 underdeveloped, 6-8 imaginative, 9-10 original/compelling
+2. structure: 0-2 no shape, 3-5 basic, 6-8 clear arc, 9-10 sophisticated control
+3. vocabulary: 0-2 simple/repetitive, 3-5 some variety, 6-8 precise/evocative, 9-10 ambitious/well-deployed
+4. sentences: 0-2 simple only, 3-5 some variety, 6-8 clear variety/controlled, 9-10 deliberate craft
+5. accuracy: 0-2 frequent errors, 3-5 some errors, 6-8 mostly accurate, 9-10 consistently accurate
+
+Calibrate for age 11. Quote directly from the essay wherever possible.
+
+Return this exact JSON:
+{
+  "overall_score": <0-50>,
+  "band": <"Developing"|"Approaching"|"Meeting"|"Exceeding">,
+  "summary": <2 warm sentences>,
+  "criteria": {
+    "content_and_ideas": {"score": <0-10>, "evidence": <quote or observation>},
+    "structure": {"score": <0-10>, "evidence": <observation>},
+    "vocabulary": {"score": <0-10>, "evidence": <quote>},
+    "sentences": {"score": <0-10>, "evidence": <observation>},
+    "accuracy": {"score": <0-10>, "evidence": <observation>}
+  },
+  "strengths": [
+    {"title": <short label>, "detail": <specific example with quote>},
+    {"title": <short label>, "detail": <specific example with quote>},
+    {"title": <short label>, "detail": <specific example with quote>}
+  ],
+  "improvements": [
+    {"title": <short label>, "detail": <what to improve with quote from essay>},
+    {"title": <short label>, "detail": <what to improve with quote from essay>},
+    {"title": <short label>, "detail": <what to improve with quote from essay>}
+  ],
+  "next_time": [
+    {"title": <short label>, "detail": <concrete actionable technique>},
+    {"title": <short label>, "detail": <concrete actionable technique>},
+    {"title": <short label>, "detail": <concrete actionable technique>}
+  ]
+}`;
+    try{
+      const raw=await callClaude(sys,[{role:"user",content:essay}],1800);
+      const r=JSON.parse(raw.replace(/```json|```/g,"").trim());
+      setResult(r);
+      const entry={id:Date.now(),date:new Date().toLocaleDateString("en-GB",{day:"numeric",month:"short"}),prompt:prompt.substring(0,60)+(prompt.length>60?"…":""),score:r.overall_score,band:r.band,criteria:{content:r.criteria.content_and_ideas.score,structure:r.criteria.structure.score,vocabulary:r.criteria.vocabulary.score,sentences:r.criteria.sentences.score,accuracy:r.criteria.accuracy.score}};
+      const nh=[...history,entry];
+      setHistory(nh);saveHistory(nh,studentName);
+      setSc("feedback");
+    }catch(e){setSc("check");showErr("Marking failed: "+e.message);}
+  }
+
+  async function loadModel(){
+    if(mOpen){setMOpen(false);return;}
+    setMLoad(true);
+    const sys=`Write a model answer for an 11+ creative writing exam scoring 44-48/50. CRITICAL: Write as an exceptionally able 11-year-old. Impressive but age-credible vocabulary. Feelings shown not stated. One small imperfection. 420-500 words. Include: strong opening not starting with "I" or weather; extended metaphor; sentence variety; ambitious punctuation used correctly; circular structure; specific sensory detail. Return ONLY the essay — no title, no preamble.`;
+    try{const e=await callClaude(sys,[{role:"user",content:`Prompt: "${prompt}"`}],1000);setMEssay(e);setMOpen(true);}
+    catch(e){showErr("Could not load model answer: "+e.message);}
+    finally{setMLoad(false);}
+  }
+
+  function clearHistory(){if(!window.confirm("Delete all saved results?"))return;setHistory([]);saveHistory([],studentName);}
+  function resetSession(){setSc("upload");setFiles([]);setTyped("");setTxRaw("");setFlags([]);setFVals({});setEm(false);setResult(null);setMOpen(false);}
+
+  const wc=typed.trim().split(/\s+/).filter(Boolean).length;
+  const txWc=txRaw.replace(/\[UNCLEAR[^\]]*\]/g,"X").split(/\s+/).filter(Boolean).length;
+  const critLabels={content_and_ideas:"Content & ideas",structure:"Structure",vocabulary:"Vocabulary",sentences:"Sentences",accuracy:"Accuracy"};
+  const critFullNames={content:"Content & ideas",structure:"Structure",vocabulary:"Vocabulary",sentences:"Sentences",accuracy:"Accuracy"};
+
+  const avgScore=history.length?Math.round(history.reduce((s,r)=>s+r.score,0)/history.length):null;
+  const latestScore=history.length?history[history.length-1].score:null;
+  const trend=history.length>1?latestScore-history[0].score:null;
+  const critAvgs=history.length?["content","structure","vocabulary","sentences","accuracy"].reduce((acc,k)=>{acc[k]=Math.round(history.reduce((s,r)=>s+(r.criteria[k]||0),0)/history.length*10)/10;return acc;},{}):null;
+  const weakest=critAvgs?Object.entries(critAvgs).sort((a,b)=>a[1]-b[1]).slice(0,2):[];
+  const strongest=critAvgs?Object.entries(critAvgs).sort((a,b)=>b[1]-a[1]).slice(0,1):[];
+
+  return <div style={{fontFamily:"-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif",background:C.bg2,minHeight:"100vh",fontSize:15,color:C.tx1}}>
+    <style>{`@keyframes spin{to{transform:rotate(360deg)}} *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}`}</style>
+
+    <div style={{background:C.bg,borderBottom:`0.5px solid ${C.bd}`,padding:"0 16px",height:50,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+      <div style={{fontSize:14,fontWeight:600,color:C.p800,display:"flex",alignItems:"center",gap:7}}>
+        <div style={{width:7,height:7,background:C.p600,borderRadius:"50%"}}/>
+        11+ writing
+      </div>
+      <div style={{display:"flex",gap:0,background:C.bg2,borderRadius:8,padding:2}}>
+        {["mark","tracker"].map(t=><button key={t} onClick={()=>setTab(t)} style={{padding:"4px 14px",border:"none",borderRadius:6,fontSize:12,fontWeight:500,cursor:"pointer",fontFamily:"inherit",background:tab===t?C.bg:C.bg2,color:tab===t?C.p600:C.tx3,boxShadow:tab===t?"0 1px 3px rgba(0,0,0,0.08)":"none"}}>
+          {t==="mark"?"Mark":"Tracker"}
+        </button>)}
+      </div>
+    </div>
+
+    <div style={{maxWidth:600,margin:"0 auto",padding:16}}>
+      {err&&<div style={{background:C.r50,border:"0.5px solid #F0997B",borderRadius:10,padding:"12px 14px",fontSize:13,color:C.r600,marginBottom:12}}>{err}</div>}
+
+      {tab==="tracker"&&<div>
+        <div style={card}>
+          {!editName
+            ?<div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+              <div><span style={lbl}>Student</span><div style={{fontSize:16,fontWeight:500}}>{studentName||"Not set"}</div></div>
+              <button onClick={()=>{setNameDraft(studentName);setEditName(true);}} style={{fontSize:12,color:C.p600,background:"none",border:"none",cursor:"pointer",textDecoration:"underline",fontFamily:"inherit"}}>✏️ {studentName?"Edit":"Set name"}</button>
+            </div>
+            :<div>
+              <span style={lbl}>Student name</span>
+              <input value={nameDraft} onChange={e=>setNameDraft(e.target.value)} placeholder="e.g. Aisha" autoFocus style={{width:"100%",border:`0.5px solid ${C.p400}`,borderRadius:8,padding:"8px 12px",fontSize:14,fontFamily:"inherit",outline:"none",marginBottom:10}}/>
+              <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
+                <button onClick={()=>setEditName(false)} style={{...bs,...bsm}}>Cancel</button>
+                <button onClick={saveName} style={{...bp,...bsm}}>Save</button>
+              </div>
+            </div>}
+        </div>
+
+        {!histLoaded&&<div style={{textAlign:"center",color:C.tx3,padding:20,fontSize:13}}>Loading…</div>}
+
+        {histLoaded&&history.length===0&&<div style={{...card,textAlign:"center",padding:"32px 16px"}}>
+          <div style={{fontSize:32,marginBottom:12}}>📝</div>
+          <div style={{fontSize:14,fontWeight:500,marginBottom:6}}>No results yet</div>
+          <div style={{fontSize:13,color:C.tx3}}>Complete a marking session to start tracking progress</div>
+        </div>}
+
+        {histLoaded&&history.length>0&&<div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,marginBottom:12}}>
+            {[
+              {label:"Latest",value:latestScore+"/50",sub:history[history.length-1].band},
+              {label:"Average",value:avgScore+"/50",sub:history.length+" attempt"+(history.length!==1?"s":"")},
+              {label:"Progress",value:trend===null?"—":trend>0?"+"+trend:trend===0?"→":trend,sub:trend===null?"first attempt":"from first",color:trend>0?C.t600:trend<0?C.r600:C.tx3},
+            ].map((s,i)=><div key={i} style={{background:C.bg,border:`0.5px solid ${C.bd}`,borderRadius:12,padding:"12px 10px",textAlign:"center"}}>
+              <div style={{fontSize:11,color:C.tx3,marginBottom:4}}>{s.label}</div>
+              <div style={{fontSize:20,fontWeight:600,color:s.color||C.p800}}>{s.value}</div>
+              <div style={{fontSize:11,color:C.tx3,marginTop:2}}>{s.sub}</div>
+            </div>)}
+          </div>
+
+          <div style={card}>
+            <span style={lbl}>Score over time</span>
+            <MiniChart history={history}/>
+          </div>
+
+          <div style={card}>
+            <span style={lbl}>Average by criterion</span>
+            {Object.entries(critAvgs).map(([k,v])=><CritRow key={k} label={critFullNames[k]} score={v} color={weakest.find(w=>w[0]===k)?C.a400:strongest[0]?.[0]===k?C.t400:C.p400}/>)}
+            <div style={{marginTop:12,display:"flex",flexDirection:"column",gap:6}}>
+              {strongest[0]&&<div style={{fontSize:12,color:C.t800,background:C.t50,borderRadius:8,padding:"7px 10px"}}>💪 Strongest: <strong>{critFullNames[strongest[0][0]]}</strong> — avg {strongest[0][1]}/10</div>}
+              {weakest[0]&&<div style={{fontSize:12,color:C.a800,background:C.a50,borderRadius:8,padding:"7px 10px"}}>📌 Focus area: <strong>{critFullNames[weakest[0][0]]}</strong> — avg {weakest[0][1]}/10</div>}
+            </div>
+          </div>
+
+          <div style={card}>
+            <span style={lbl}>All attempts</span>
+            {[...history].reverse().map((r,i)=><div key={r.id} style={{padding:"10px 0",borderBottom:i<history.length-1?`0.5px solid ${C.bd}`:"none"}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:4}}>
+                <div style={{fontSize:13,color:C.tx2,flex:1,marginRight:8,lineHeight:1.4}}>{r.prompt}</div>
+                <div style={{display:"flex",alignItems:"center",gap:6,flexShrink:0}}>
+                  <div style={{fontSize:15,fontWeight:600,color:C.p800}}>{r.score}/50</div>
+                  <div style={{fontSize:11,fontWeight:500,padding:"2px 8px",borderRadius:20,...(bandSty[r.band]||bandSty.Meeting)}}>{r.band}</div>
+                </div>
+              </div>
+              <div style={{fontSize:11,color:C.tx3}}>{r.date}</div>
+            </div>)}
+          </div>
+
+          <div style={{textAlign:"center",marginBottom:8}}>
+            <button onClick={clearHistory} style={{fontSize:12,color:C.tx3,background:"none",border:"none",cursor:"pointer",fontFamily:"inherit",textDecoration:"underline"}}>Clear all results</button>
+          </div>
+        </div>}
+      </div>}
+
+      {tab==="mark"&&<div>
+        {sc==="upload"&&<div>
+          <Steps active={1}/>
+          <div style={card}>
+            {!editP?<>
+              <span style={lbl}>Today's prompt</span>
+              <div style={{fontSize:15,color:C.tx1,lineHeight:1.5,fontStyle:"italic",marginBottom:8}}>"{prompt}"</div>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                <div style={{fontSize:12,color:C.tx3,display:"flex",gap:14}}><span>35 min</span><span>400–550 words</span></div>
+                <button onClick={()=>{setPDraft(prompt);setEditP(true);}} style={{fontSize:12,color:C.p600,background:"none",border:"none",cursor:"pointer",textDecoration:"underline",fontFamily:"inherit"}}>✏️ Change prompt</button>
+              </div>
+            </>:<>
+              <span style={lbl}>Enter the exam prompt</span>
+              <textarea value={pDraft} onChange={e=>setPDraft(e.target.value)} placeholder="Type the prompt here…" autoFocus style={{width:"100%",border:`0.5px solid ${C.p400}`,borderRadius:8,padding:"10px 12px",fontSize:14,lineHeight:1.5,fontFamily:"inherit",color:C.tx1,background:C.bg,outline:"none",minHeight:72,marginBottom:10,resize:"vertical"}}/>
+              <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
+                <button onClick={()=>setEditP(false)} style={{...bs,...bsm}}>Cancel</button>
+                <button onClick={savePrompt} style={{...bp,...bsm}}>Set prompt</button>
+              </div>
+            </>}
+          </div>
+
+          <div style={{display:"flex",gap:8,marginBottom:14}}>
+            <button style={mb(mode==="photo")} onClick={()=>setMode("photo")}>
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+              Upload photo
+            </button>
+            <button style={mb(mode==="type")} onClick={()=>setMode("type")}>
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="4 7 4 4 20 4 20 7"/><line x1="9" y1="20" x2="15" y2="20"/><line x1="12" y1="4" x2="12" y2="20"/></svg>
+              Type it in
+            </button>
+          </div>
+
+          {mode==="photo"&&<div>
+            <div style={{border:`1.5px dashed ${C.bd2}`,borderRadius:14,padding:"28px 16px",textAlign:"center",cursor:"pointer",background:C.bg,marginBottom:12}} onClick={()=>fRef.current.click()}>
+              <div style={{width:48,height:48,background:C.p50,borderRadius:"50%",display:"flex",alignItems:"center",justifyContent:"center",margin:"0 auto 10px",color:C.p600}}>
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+              </div>
+              <div style={{fontSize:14,fontWeight:500,marginBottom:3}}>Photo your work</div>
+              <div style={{fontSize:12,color:C.tx3,marginBottom:12}}>Flat, well-lit, whole page in frame</div>
+              <span style={{...bs,...bsm}}>Take photo or choose file</span>
+            </div>
+            <input ref={fRef} type="file" accept="image/*" capture="environment" multiple style={{display:"none"}} onChange={e=>addFiles(e.target.files)}/>
+            {files.length>0&&<div>
+              <div style={{display:"flex",gap:10,flexWrap:"wrap",marginBottom:12}}>
+                {files.map((f,i)=><div key={i} style={{position:"relative"}}>
+                  <img src={URL.createObjectURL(f)} alt={`Page ${i+1}`} style={{width:72,height:96,borderRadius:8,objectFit:"cover",border:`0.5px solid ${C.bd}`,display:"block"}}/>
+                  <div style={{fontSize:10,color:C.tx3,textAlign:"center",marginTop:3}}>Page {i+1}</div>
+                  <div onClick={()=>removeFile(i)} style={{position:"absolute",top:-6,right:-6,width:18,height:18,background:"#fff",border:`0.5px solid ${C.bd2}`,borderRadius:"50%",display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,color:C.tx3,cursor:"pointer"}}>✕</div>
+                </div>)}
+                {files.length<4&&<div>
+                  <div onClick={()=>afRef.current.click()} style={{width:72,height:96,border:`1.5px dashed ${C.bd2}`,borderRadius:8,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:4,color:C.tx3,fontSize:11,cursor:"pointer"}}>
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                    Add page
+                  </div>
+                  <input ref={afRef} type="file" accept="image/*" capture="environment" style={{display:"none"}} onChange={e=>addFiles(e.target.files)}/>
+                </div>}
+              </div>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                <span style={{fontSize:12,color:C.tx3}}>{files.length} page{files.length!==1?"s":""} uploaded</span>
+                <button style={bp} onClick={startReading}>Read my essay <Arr/></button>
+              </div>
+            </div>}
+          </div>}
+
+          {mode==="type"&&<div>
+            <div style={{...card,padding:0,overflow:"hidden"}}>
+              <textarea value={typed} onChange={e=>setTyped(e.target.value)} placeholder="Type or paste the essay here…" style={{width:"100%",minHeight:240,border:"none",outline:"none",fontSize:14,lineHeight:1.85,fontFamily:"inherit",color:C.tx1,padding:"14px 16px",background:"transparent",display:"block",resize:"vertical"}}/>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 16px",borderTop:`0.5px solid ${C.bd}`}}>
+                <span style={{fontSize:12,color:C.tx3}}>{wc} word{wc!==1?"s":""}</span>
+                <button style={{...bp,...bsm}} onClick={submitTyped}>Mark my essay <Arr/></button>
+              </div>
+            </div>
+            <div style={{fontSize:12,color:C.tx3,textAlign:"center",padding:"6px 0"}}>Spelling & punctuation marked as written</div>
+          </div>}
+        </div>}
+
+        {sc==="proc"&&<div>
+          <Steps active={2}/>
+          <div style={card}>
+            <div style={{fontSize:14,fontWeight:500,marginBottom:16}}>{pTitle}</div>
+            <div style={{display:"flex",flexDirection:"column",gap:14}}>
+              {[{l:"Photos received",s:pSub},{l:"Transcribing handwriting",s:"Reading every word as written"},{l:"Flagging unclear words",s:""},{l:"Ready for sense check",s:""}].map((step,i)=>{
+                const n=i+1,t=n<pStep?"done":n===pStep?"active":"wait";
+                return <div key={n} style={{display:"flex",alignItems:"flex-start",gap:10}}>
+                  <div style={{width:26,height:26,borderRadius:"50%",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,background:t==="done"?C.t50:t==="active"?C.p50:C.g100,color:t==="done"?C.t600:C.g400}}>
+                    {t==="done"?<Chk/>:t==="active"?<Spn/>:<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>}
+                  </div>
+                  <div><div style={{fontSize:13,color:t==="wait"?C.tx3:C.tx1}}>{step.l}</div>{step.s&&<div style={{fontSize:11,color:C.tx3,marginTop:1}}>{step.s}</div>}</div>
+                </div>;
+              })}
+            </div>
+            <div style={{fontSize:12,color:C.tx3,textAlign:"center",marginTop:16}}>Usually takes about 20 seconds</div>
+          </div>
+        </div>}
+
+        {sc==="check"&&<div>
+          <Steps active={3}/>
+          {flags.length>0&&<div style={{background:C.a50,border:`0.5px solid ${C.a100}`,borderRadius:14,padding:14,marginBottom:12}}>
+            <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:12}}>
+              <div style={{fontSize:13,fontWeight:600,color:C.a800}}>{flags.length} word{flags.length!==1?"s":""} we weren't sure about</div>
+              <span style={{fontSize:11,fontWeight:500,padding:"2px 8px",borderRadius:20,background:C.a100,color:C.a800}}>needs your input</span>
+            </div>
+            {flags.map(f=><div key={f.id} style={{padding:"9px 0",borderBottom:"0.5px solid rgba(0,0,0,.07)"}}>
+              <div style={{fontSize:12,color:C.tx2,lineHeight:1.5,marginBottom:6}}>…{f.before} <span style={{color:C.a800,fontWeight:600}}>[unclear]</span> {f.after}…</div>
+              <div style={{display:"flex",alignItems:"center",gap:8}}>
+                <input value={fVals[f.id]||""} onChange={e=>setFVals(p=>({...p,[f.id]:e.target.value}))} placeholder={f.guess?`We guessed: ${f.guess}`:"Type the word"} style={{border:`0.5px solid ${C.bd2}`,borderRadius:8,padding:"6px 10px",fontSize:13,fontFamily:"inherit",color:C.tx1,background:C.bg,width:160,outline:"none"}}/>
+                <button onClick={()=>setFVals(p=>({...p,[f.id]:f.guess||"[unclear]"}))} style={{fontSize:12,color:C.tx3,background:"none",border:"none",cursor:"pointer",fontFamily:"inherit"}}>skip</button>
+              </div>
+            </div>)}
+          </div>}
+          <div style={card}>
+            <span style={lbl}>What we read — check this looks right</span>
+            <div style={{fontSize:12,color:C.tx3,marginBottom:10}}>Highlighted words were hard to read — fix them above if needed.</div>
+            {!em?<div style={{fontSize:13,lineHeight:1.85,background:C.bg2,borderRadius:8,padding:12,marginBottom:10}} dangerouslySetInnerHTML={{__html:txHtml()}}/>
+              :<textarea value={et} onChange={e=>setEt(e.target.value)} style={{width:"100%",minHeight:180,border:`0.5px solid ${C.bd2}`,borderRadius:8,padding:12,fontSize:13,lineHeight:1.85,fontFamily:"inherit",color:C.tx1,background:C.bg,outline:"none",marginBottom:10,resize:"vertical"}}/>}
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+              <span style={{fontSize:12,color:C.tx3}}>~{txWc} words · {flags.length} flag{flags.length!==1?"s":""}</span>
+              <button style={{...bs,...bsm}} onClick={toggleEdit}>{em?"Done editing":"Edit directly"}</button>
+            </div>
+          </div>
+          <button style={bp} onClick={submitMark}>Looks good — mark it <Arr/></button>
+        </div>}
+
+        {sc==="feedback"&&result&&<div>
+          <Steps active={4}/>
+          <div style={card}>
+            <div style={{display:"flex",alignItems:"center",gap:16,marginBottom:18}}>
+              <div style={{width:76,height:76,borderRadius:"50%",background:C.p50,border:`2px solid ${C.p200}`,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",flexShrink:0}}>
+                <div style={{fontSize:24,fontWeight:600,color:C.p800,lineHeight:1}}>{result.overall_score}</div>
+                <div style={{fontSize:11,color:C.p400,marginTop:2}}>/ 50</div>
+              </div>
+              <div>
+                <div style={{display:"inline-block",fontSize:12,fontWeight:500,padding:"3px 10px",borderRadius:20,marginBottom:5,...(bandSty[result.band]||bandSty.Meeting)}}>{result.band}</div>
+                <div style={{fontSize:13,color:C.tx2,lineHeight:1.5}}>{result.summary}</div>
+              </div>
+            </div>
+            {Object.entries(result.criteria).map(([k,v])=><CritRow key={k} label={critLabels[k]} score={v.score}/>)}
+          </div>
+
+          <div style={card}>
+            <span style={lbl}>✅ What worked well</span>
+            {(result.strengths||[]).map((s,i)=><div key={i} style={{borderLeft:`2px solid ${C.t400}`,padding:"8px 12px",background:C.t50,marginBottom:i<2?8:0,borderRadius:"0 8px 8px 0"}}>
+              <div style={{fontSize:12,fontWeight:600,color:C.t600,marginBottom:3}}>{s.title}</div>
+              <div style={{fontSize:13,color:C.t800,lineHeight:1.5}}>{s.detail}</div>
+            </div>)}
+          </div>
+
+          <div style={card}>
+            <span style={lbl}>📌 Areas to improve</span>
+            {(result.improvements||[]).map((s,i)=><div key={i} style={{borderLeft:`2px solid ${C.a400}`,padding:"8px 12px",background:C.a50,marginBottom:i<2?8:0,borderRadius:"0 8px 8px 0"}}>
+              <div style={{fontSize:12,fontWeight:600,color:C.a600,marginBottom:3}}>{s.title}</div>
+              <div style={{fontSize:13,color:C.a800,lineHeight:1.5}}>{s.detail}</div>
+            </div>)}
+          </div>
+
+          <div style={card}>
+            <span style={lbl}>🎯 Next time, try this</span>
+            {(result.next_time||[]).map((s,i)=><div key={i} style={{borderLeft:`2px solid ${C.p400}`,padding:"8px 12px",background:C.p50,marginBottom:i<2?8:0,borderRadius:"0 8px 8px 0"}}>
+              <div style={{fontSize:12,fontWeight:600,color:C.p600,marginBottom:3}}>{s.title}</div>
+              <div style={{fontSize:13,color:C.p800,lineHeight:1.5}}>{s.detail}</div>
+            </div>)}
+          </div>
+
+          <div onClick={loadModel} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"13px 15px",background:C.bg,border:`0.5px solid ${C.bd}`,borderRadius:14,cursor:"pointer",marginBottom:12}}>
+            <div>
+              <div style={{fontSize:13,color:C.tx2}}>See how a strong answer might look</div>
+              <div style={{fontSize:11,color:C.tx3,marginTop:1}}>With notes on each technique</div>
+            </div>
+            <div style={{fontSize:13,color:C.p600,fontWeight:500,marginLeft:10}}>{mLoad?"Loading…":mOpen?"Hide →":"Show me →"}</div>
+          </div>
+          {mOpen&&<div style={card}>
+            <span style={lbl}>A model answer — one way it could look</span>
+            <div style={{fontSize:13,lineHeight:1.85,color:C.tx1,paddingTop:6}} dangerouslySetInnerHTML={{__html:mEssay.replace(/\n\n/g,"<br><br>").replace(/\n/g,"<br>")}}/>
+          </div>}
+
+          <button style={{...bs,...bsm,marginTop:4,marginBottom:20}} onClick={resetSession}>← New attempt</button>
+        </div>}
+      </div>}
+    </div>
+  </div>;
+}
